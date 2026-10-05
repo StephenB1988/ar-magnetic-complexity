@@ -1,0 +1,10 @@
+local_settings.py
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.vscode/
+output/
+*.log
+.mypy_cache/
+.venv/
+venv/

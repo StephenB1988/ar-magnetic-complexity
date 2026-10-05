@@ -1,0 +1,6 @@
+sunpy
+drms
+astropy
+joblib
+numpy
+scipy
