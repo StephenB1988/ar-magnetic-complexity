@@ -4,3 +4,4 @@ astropy
 joblib
 numpy
 scipy
+beautifulsoup4
