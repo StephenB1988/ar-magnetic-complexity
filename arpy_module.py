@@ -86,7 +86,7 @@ def limb_darkening_correction_hmi(continuum_map:sunpy.map.Map):
 
 
 
-def clean_mask(feature_mask:np.ndarray, req_neighbours:int=3) -> np.ndarray:
+def clean_mask(feature_mask: np.ndarray, req_neighbours: int = 3) -> np.ndarray:
     """Denoise a binary feature mask.
 
     Erodes the mask by keeping only pixels with more than
@@ -96,18 +96,20 @@ def clean_mask(feature_mask:np.ndarray, req_neighbours:int=3) -> np.ndarray:
     beyond the original mask.
 
     Args:
-        feature_mask: 2D binary array (0/1) of a feature mask.
+        feature_mask: 2D binary array (0/1 or bool) of a feature mask.
         req_neighbours: Minimum neighbour count (out of 9, including
             self) required for a pixel to survive erosion.
 
     Returns:
         Denoised binary mask, same shape as feature_mask.
     """
-    neighbour_count = ndimage.convolve(feature_mask, np.ones((3, 3)), mode='constant', cval=0)
-    eroded_mask = (neighbour_count > req_neighbours) * feature_mask
+    mask_int = feature_mask.astype(np.int32)
+
+    neighbour_count = ndimage.convolve(mask_int, np.ones((3, 3)), mode='constant', cval=0)
+    eroded_mask = (neighbour_count > req_neighbours) * mask_int
 
     regrow_count = ndimage.convolve(eroded_mask, np.ones((3, 3)), mode='constant', cval=0)
-    regrown_mask = (regrow_count * feature_mask) > 0
+    regrown_mask = (regrow_count * mask_int) > 0
 
     return regrown_mask
 

@@ -48,6 +48,8 @@ PIXEL_SCAN_STEP = 3
 MIN_AREA = 8
 GAUSS_THRESHOLD = 0
 
+debug = False
+
 
 def ensure_leap_second_data():
     """Force astropy to fetch leap-second data once, up front.
@@ -63,15 +65,15 @@ def parse_sharp_filename(filename):
 
     Expected format: '<inst>.<series>.<harpnum>.<trec>.<segment>.fits',
     e.g. 'hmi.sharp_cea_720s_nrt.7371.20231001_000000_TAI.Br.fits'.
-    Assumes JSOC's dot-delimited export naming and that T_REC values in
-    filenames don't themselves contain dots. Not yet verified against
-    an actual downloaded file.
     """
     parts = filename.split('.')
+    trec = parts[3]
+    time = datetime.datetime.strptime(trec, '%Y%m%d_%H%M%S_TAI').isoformat()
     return {
         'series': f'{parts[0]}.{parts[1]}',
         'harpnum': int(parts[2]),
-        'trec': parts[3],
+        'trec': trec,
+        'time': time,
         'segment': parts[4],
         'is_nrt': '_nrt' in parts[1],
     }
@@ -171,6 +173,11 @@ def process_single_triplet(image_triplet, data_dir):
         # freed before the heavier feature-extraction work below.
         met = con_map.meta
         all_car = sunpy.map.all_coordinates_from_map(con_map)
+        
+        print('all_car frame:', type(all_car.frame).__name__)
+        for key in ('CTYPE1', 'CTYPE2', 'CRVAL1', 'CRVAL2', 'CRLN_OBS', 'CRLT_OBS'):
+            print(key, '=', met.get(key))
+    
         con = normalise_to_qs(limb_darkening_correction_hmi(con_map).data)
     except Exception as error:
         return {
@@ -188,16 +195,30 @@ def process_single_triplet(image_triplet, data_dir):
         del all_car, all_hs
 
         threshold_mask = con <= FEATURE_INTENSITY
+        
+        if debug:
+            print('con min/max/median:', con.min(), con.max(), np.median(con))
+            print('threshold_mask sum:', threshold_mask.sum())
 
         polarity_map = (np.zeros_like(con)
                          + ((mag > GAUSS_THRESHOLD) * 1)
                          + ((mag < -GAUSS_THRESHOLD) * -1))
         positive_mask_pre = threshold_mask * (polarity_map > 0)
         negative_mask_pre = threshold_mask * (polarity_map < 0)
+        
+        if debug:
+            print('positive_mask_pre sum:', positive_mask_pre.sum())
+            print('negative_mask_pre sum:', negative_mask_pre.sum())
+
         del threshold_mask, polarity_map, con
 
         positive_mask = clean_mask(positive_mask_pre)
         negative_mask = clean_mask(negative_mask_pre)
+        
+        if debug:
+            print('positive_mask (post-clean) sum:', positive_mask.sum())
+            print('negative_mask (post-clean) sum:', negative_mask.sum())
+        
         del positive_mask_pre, negative_mask_pre
 
         feature_masks_co_p = extract_feature_coords(
@@ -205,10 +226,16 @@ def process_single_triplet(image_triplet, data_dir):
         feature_masks_co_n = extract_feature_coords(
             negative_mask, PIXEL_SCAN_STEP, MIN_AREA)
 
+        if debug:
+            print('features pre-bitmap: pos =', len(feature_masks_co_p), ' neg =', len(feature_masks_co_n))
+            
         feature_masks_im_p = convert_coords_to_masks(feature_masks_co_p, positive_mask)
         feature_masks_im_n = convert_coords_to_masks(feature_masks_co_n, negative_mask)
         del positive_mask, negative_mask
 
+        if debug:
+            print('CRLN_OBS:', met.get('CRLN_OBS'), 'CRLT_OBS:', met.get('CRLT_OBS'), 'DSUN_OBS:', met.get('DSUN_OBS'))
+        
         feature_centroid_co_p = [
             compute_feature_centroid(f, lat_map, lon_map) for f in feature_masks_co_p]
         feature_centroid_co_n = [
@@ -219,10 +246,23 @@ def process_single_triplet(image_triplet, data_dir):
             feature_masks_co_p, feature_masks_im_p, feature_centroid_co_p, bmp_mask)
         feature_masks_co_n, feature_masks_im_n, feature_centroid_co_n = filter_by_bitmap(
             feature_masks_co_n, feature_masks_im_n, feature_centroid_co_n, bmp_mask)
+            
+        if debug:
+            print('features post-bitmap: pos =', len(feature_masks_co_p), ' neg =', len(feature_masks_co_n))
+            print('bmp_mask sum:', bmp_mask.sum(), ' bmp max:', bmp.max())
+            
         del feature_masks_im_p, feature_masks_im_n, bmp_mask, bmp
 
         p_centroids = list(feature_centroid_co_p)
         n_centroids = list(feature_centroid_co_n)
+        
+        if debug:
+            sample_coords = feature_masks_co_p[0][:3]
+            for r, c in sample_coords:
+                print(f'feature pixel ({r},{c}): lat={lat_map[r, c]:.4f}, lon={lon_map[r, c]:.4f}')
+
+            print('p_centroids (per-feature, before combining):', p_centroids)
+            print('n_centroids (per-feature, before combining):', n_centroids)
         
         p_feature_count = len(p_centroids)
         n_feature_count = len(n_centroids)
@@ -239,11 +279,19 @@ def process_single_triplet(image_triplet, data_dir):
         all_centroids_ll = p_centroids + n_centroids
         all_flux = pos_flux_list + neg_flux_list
         global_centroid = spherical_centroid(all_centroids_ll, weights=all_flux)
+        
+        if debug:
+            print('global_centroid:', global_centroid)
 
         pim_uw, pim_fw = polarity_inversion_measures(p_centroids, n_centroids, pos_flux_list, neg_flux_list)
         adm_uw, adm_fw = angular_deviation_measures(p_centroids, n_centroids, pos_flux_list, neg_flux_list, guide_line_angle)
 
         del mag
+
+
+
+
+
 
         return {
             'success': True,
@@ -271,12 +319,8 @@ def process_single_triplet(image_triplet, data_dir):
 
 
 def load_existing_measures(measures_path):
-    """Load previously written measures and the set of trecs covered.
-
-    'trec' is stored per entry purely so reruns can tell which
-    time-steps are already done — it isn't one of the six fields you
-    listed as important, so drop it before using the data downstream
-    if you'd rather it not be there; it's cheap to strip at load time.
+    """
+    Load previously written measures and the set of trecs covered.
     """
     if not os.path.exists(measures_path):
         return [], set()
@@ -285,7 +329,7 @@ def load_existing_measures(measures_path):
         existing_data = json.load(f)
 
     existing_measures = existing_data.get('measures', [])
-    processed_trecs = {m['trec'] for m in existing_measures if 'trec' in m}
+    processed_trecs = {m['time'] for m in existing_measures if 'time' in m}
     return existing_measures, processed_trecs
 
 
@@ -297,7 +341,7 @@ def process_harp(harp_num, triplet_list, data_dir, output_dir, is_nrt):
 
     new_triplets = [
         triplet for triplet in triplet_list
-        if parse_sharp_filename(triplet[0])['trec'] not in processed_trecs
+        if parse_sharp_filename(triplet[0])['time'] not in processed_trecs
     ]
 
     if not new_triplets:
@@ -327,9 +371,7 @@ def process_harp(harp_num, triplet_list, data_dir, output_dir, is_nrt):
         for triplet, result in zip(batch, results):
             log_entries.append(result['log_entry'])
             if result['success']:
-                measure = result['measures']
-                measure['trec'] = parse_sharp_filename(triplet[0])['trec']
-                results_out.append(measure)
+                results_out.append(result['measures'])
             elif 'close_limb' not in result:
                 err_entries.append(result['log_entry'])
 
