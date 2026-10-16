@@ -9,7 +9,6 @@ downloaded in one Fido.fetch call.
 import datetime
 import os
 import time
-from collections import defaultdict
 
 from sunpy.net import Fido, attrs as a
 
@@ -33,28 +32,6 @@ def search_all_harps(t_start, t_end):
         a.jsoc.Segment('bitmap'),
         a.jsoc.Notify(config.JSOC_REGISTERED_EMAIL),
     )
-
-
-def select_recent_rows(res, n_recent):
-    """Keep only the n_recent most recent rows per HARPNUM.
-
-    Assumes the JSOC response table has 'HARPNUM' and 'T_REC' columns.
-    Confirm this with `print(res[0].columns)` before relying on it, as
-    this hasn't been run against live JSOC.
-    """
-    table = res[0]
-    by_harp = defaultdict(list)
-
-    for idx, row in enumerate(table):
-        by_harp[int(row['HARPNUM'])].append((str(row['T_REC']), idx))
-
-    keep_indices = []
-    for entries in by_harp.values():
-        entries.sort(key=lambda item: item[0])
-        keep_indices.extend(idx for _, idx in entries[-n_recent:])
-
-    keep_indices.sort()
-    return table[keep_indices]
 
 
 def count_existing_files(scan_dir, harp_num):
@@ -85,11 +62,10 @@ def main():
     t_start, t_end = get_time_range(config.N_HOURS)
 
     res = search_all_harps(t_start, t_end)
-    rows_to_fetch = select_recent_rows(res, config.N_RECENT_TIMESTEPS)
 
-    harp_nums = sorted({int(row['HARPNUM']) for row in rows_to_fetch})
+    harp_nums = sorted({int(row['HARPNUM']) for row in res[0]})
     print('HARPs found:', harp_nums)
-    print(f'Fetching up to {config.N_RECENT_TIMESTEPS} most recent timestep(s) each.')
+    print(f'Fetching records found in the last {config.N_HOURS} hour(s).')
 
     with open(config.DOWNLOAD_LOG_FILE, 'a') as log:
         log.write(
@@ -99,7 +75,7 @@ def main():
         )
         log.write(f'HARPs found: {harp_nums}\n')
 
-    download_success = fetch_with_retries(rows_to_fetch)
+    download_success = fetch_with_retries(res)
 
     if not download_success:
         with open(config.DOWNLOAD_LOG_FILE, 'a') as log:

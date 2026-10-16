@@ -8,7 +8,7 @@ see local_settings_example.py for a template.
 import os
 
 try:
-    from local_settings import HMI_DIR, JSOC_REGISTERED_EMAIL
+    from local_settings import HMI_DIR, JSOC_REGISTERED_EMAIL, GONG_DIR
 except ImportError as exc:
     raise ImportError(
         'local_settings.py not set up correctly. Copy local_settings.example.py to '
@@ -16,17 +16,10 @@ except ImportError as exc:
     ) from exc
 
 # --------------------------------------------------------------------------
-# General
-# --------------------------------------------------------------------------
-# Number of most recent time-steps to download per HARP (each time-step
-# yields 3 files: continuum, Br, bitmap).
-N_RECENT_TIMESTEPS = 2
-
-# --------------------------------------------------------------------------
 # download_hmi.py settings
 # --------------------------------------------------------------------------
 # Near-real-time lookback window, in hours, ending at the time the script
-N_HOURS = 1
+N_HOURS = 1.5
 
 MAX_RETRIES = 10
 RETRY_WAIT_SECONDS = 15
@@ -36,12 +29,13 @@ DOWNLOAD_DIR = HMI_DIR + '{file}'
 DOWNLOAD_LOG_FILE = os.path.join(HMI_DIR, 'download.log')
 SCAN_DIR = HMI_DIR
 
+
+
 # --------------------------------------------------------------------------
 # download_gong.py settings
 # --------------------------------------------------------------------------
 # Delete the pre-existing files before attempting to download new ones?
 GONG_CLEAN_BEFORE_DOWNLOAD = True
-
 
 GONG_BASE_URL = 'https://gong2.nso.edu/oQR'
 GONG_MAG_PRODUCT = 'bqa'
@@ -84,19 +78,11 @@ HMI_BMP_EXTENSION = '.bitmap.fits'
  
 # Directory to read continuum/Br/bitmap files from — the same directory
 # download_hmi.py downloads into.
-HMI_PROCESS_DIR = MASTER_DIR
+HMI_PROCESS_DIR = HMI_DIR
  
 # joblib.Parallel settings — https://joblib.readthedocs.io/en/latest/generated/joblib.Parallel.html
 N_JOBS = 4
 JOBLIB_VERBOSITY = 0
 OUTER_BATCH_SIZE = 50
 JOBLIB_BATCH_SIZE = 1
- 
-# --- Feature extraction parameters — DO NOT CHANGE ---
-LIMB_LIMIT = 75
-FEATURE_INTENSITY = 0.67
-PIXEL_SCAN_STEP = 3
-MIN_AREA = 8
-GAUSS_THRESHOLD = 0
-
 

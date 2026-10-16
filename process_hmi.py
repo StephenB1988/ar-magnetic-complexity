@@ -22,7 +22,7 @@ from astropy.io import fits
 from astropy.time import Time
 from joblib import Parallel, delayed
 
-from arpy import (
+from arpy_module import (
     test_close_limb_images,
     normalise_to_qs,
     limb_darkening_correction_hmi,
@@ -39,6 +39,14 @@ from arpy import (
 )
 
 import config
+import local_settings
+
+# --- Feature extraction parameters — DO NOT CHANGE ---
+LIMB_LIMIT = 75
+FEATURE_INTENSITY = 0.67
+PIXEL_SCAN_STEP = 3
+MIN_AREA = 8
+GAUSS_THRESHOLD = 0
 
 
 def ensure_leap_second_data():
@@ -140,7 +148,7 @@ def process_single_triplet(image_triplet, data_dir):
         }
 
     try:
-        if not test_close_limb_images(con_map, limit=config.LIMB_LIMIT):
+        if not test_close_limb_images(con_map, limit=LIMB_LIMIT):
             return {
                 'success': False,
                 'log_entry': f'{stem(image_triplet[0], config.HMI_CON_EXTENSION)}: '
@@ -179,11 +187,11 @@ def process_single_triplet(image_triplet, data_dir):
         lon_map = all_hs.lon.value
         del all_car, all_hs
 
-        threshold_mask = con <= config.FEATURE_INTENSITY
+        threshold_mask = con <= FEATURE_INTENSITY
 
         polarity_map = (np.zeros_like(con)
-                         + ((mag > config.GAUSS_THRESHOLD) * 1)
-                         + ((mag < -config.GAUSS_THRESHOLD) * -1))
+                         + ((mag > GAUSS_THRESHOLD) * 1)
+                         + ((mag < -GAUSS_THRESHOLD) * -1))
         positive_mask_pre = threshold_mask * (polarity_map > 0)
         negative_mask_pre = threshold_mask * (polarity_map < 0)
         del threshold_mask, polarity_map, con
@@ -193,9 +201,9 @@ def process_single_triplet(image_triplet, data_dir):
         del positive_mask_pre, negative_mask_pre
 
         feature_masks_co_p = extract_feature_coords(
-            positive_mask, config.PIXEL_SCAN_STEP, config.MIN_AREA)
+            positive_mask, PIXEL_SCAN_STEP, MIN_AREA)
         feature_masks_co_n = extract_feature_coords(
-            negative_mask, config.PIXEL_SCAN_STEP, config.MIN_AREA)
+            negative_mask, PIXEL_SCAN_STEP, MIN_AREA)
 
         feature_masks_im_p = convert_coords_to_masks(feature_masks_co_p, positive_mask)
         feature_masks_im_n = convert_coords_to_masks(feature_masks_co_n, negative_mask)
@@ -215,6 +223,10 @@ def process_single_triplet(image_triplet, data_dir):
 
         p_centroids = list(feature_centroid_co_p)
         n_centroids = list(feature_centroid_co_n)
+        
+        p_feature_count = len(p_centroids)
+        n_feature_count = len(n_centroids)
+        tot_feature_count = p_feature_count + n_feature_count
 
         pos_flux_list = [extract_unsigned_flux(mag, mask) for mask in feature_masks_co_p]
         neg_flux_list = [extract_unsigned_flux(mag, mask) for mask in feature_masks_co_n]
@@ -239,6 +251,7 @@ def process_single_triplet(image_triplet, data_dir):
             'measures': {
                 'time': datetime.datetime.strptime(
                     met['t_rec'][0:19], '%Y.%m.%d_%H:%M:%S').isoformat(),
+                'n_spots': tot_feature_count,
                 'global_centroid': global_centroid,
                 'pim_uw': float(pim_uw),
                 'pim_fw': float(pim_fw),
@@ -348,7 +361,7 @@ def process_harp(harp_num, triplet_list, data_dir, output_dir, is_nrt):
 def main():
     ensure_leap_second_data()
 
-    Path(config.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+    Path(local_settings.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
     triplets, is_nrt = find_triplets(config.HMI_PROCESS_DIR)
     print(f'Data detected as: {"NRT" if is_nrt else "definitive"}')
@@ -357,7 +370,7 @@ def main():
     for harp_num, triplet_list in triplets.items():
         if triplet_list:
             process_harp(harp_num, triplet_list, config.HMI_PROCESS_DIR,
-                         config.OUTPUT_DIR, is_nrt)
+                         local_settings.OUTPUT_DIR, is_nrt)
 
 
 if __name__ == '__main__':
